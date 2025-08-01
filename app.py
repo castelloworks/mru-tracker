@@ -1,139 +1,104 @@
-from flask import Flask, render_template, request, redirect, url_for, session
+from flask import Flask, request, redirect, url_for, render_template, session
 import pandas as pd
 import json
 from datetime import datetime
 import os
 
 app = Flask(__name__)
-app.secret_key = 'secret_key_anda'
+app.secret_key = 'your_secret_key'
 
-# Lokasi fail
-DATA_FILE = 'data/data_flat.xlsx'
-LOG_FILE = 'data/log.json'
+# Fail data
+DATA_FILE = 'data_flat.xlsx'
+LOG_FILE = 'log.json'
 
-# User login - tambahkan admin juga
-USERS = {
-    'firdaus': 'firdaus123',
-    'fitri': 'fitri123',
-    'admin': 'admin123'
-}
-
-# Baca fail log
+# Fungsi muat log
 def load_log():
-    if os.path.exists(LOG_FILE):
-        with open(LOG_FILE, 'r') as f:
-            return json.load(f)
-    return []
+    if not os.path.exists(LOG_FILE):
+        return []
+    with open(LOG_FILE, 'r') as f:
+        return json.load(f)
 
-# Simpan ke fail log
-def save_log(log):
+# Fungsi simpan log
+def save_log(data):
     with open(LOG_FILE, 'w') as f:
-        json.dump(log, f, indent=2)
+        json.dump(data, f, indent=4)
 
-# Home / Login page
+# Fungsi baca data Excel
+def load_excel_data():
+    df = pd.read_excel(DATA_FILE)
+    df['MRU'] = df['MRU'].astype(str)
+    df.set_index('MRU', inplace=True)
+    return df
+
 @app.route('/', methods=['GET', 'POST'])
-@app.route('/login', methods=['GET', 'POST'])
 def login():
-    error = ''
     if request.method == 'POST':
-        username = request.form['username'].lower()
-        password = request.form['password']
-        if username in USERS and USERS[username] == password:
-            session['username'] = username
-            if username == 'admin':
-                return redirect(url_for('admin_dashboard'))
-            return redirect(url_for('dashboard'))
-        else:
-            error = 'Login gagal. Sila cuba lagi.'
-    return render_template('login.html', error=error)
+        rider = request.form['rider'].strip()
+        if rider:
+            session['rider'] = rider
+            return redirect(url_for('submit'))
+    return render_template('login.html')
 
-# Dashboard rider
-@app.route('/dashboard', methods=['GET', 'POST'])
-def dashboard():
-    if 'username' not in session or session['username'] == 'admin':
+@app.route('/submit', methods=['GET', 'POST'])
+def submit():
+    if 'rider' not in session:
         return redirect(url_for('login'))
 
-    mru_list = []
-    message = ''
-
+    msg = ''
     if request.method == 'POST':
-        mru_input = request.form['mru'].strip()
-        df = pd.read_excel(DATA_FILE)
-        log = load_log()
-
-        # Check duplicate
-        if any(entry['rider'] == session['username'] and entry['mru'] == mru_input for entry in log):
-            message = f'❌ MRU {mru_input} telah dihantar sebelum ini oleh anda.'
+        mru = request.form['mru'].strip()
+        if not mru:
+            msg = 'Sila masukkan nombor MRU.'
         else:
-            row = df[df['MR Unit'] == mru_input]
-            if not row.empty:
-                area = row.iloc[0]['STREET'] + ', ' + row.iloc[0]['CITY1']
-                amount = int(row.iloc[0]['Sequence Number'])  # boleh tukar ikut column nilai sebenar
+            df = load_excel_data()
+            log = load_log()
+            rider = session['rider']
 
-                log.append({
-                    'rider': session['username'],
-                    'mru': mru_input,
-                    'area': area,
-                    'amount': amount,
-                    'timestamp': datetime.now().isoformat()
-                })
-                save_log(log)
-                message = f'✅ MRU {mru_input} disimpan. Kawasan: {area}, Nilai: {amount}'
+            # Semak jika MRU wujud
+            if mru not in df.index:
+                msg = f'MRU {mru} tidak wujud dalam data.'
             else:
-                message = f'❌ MRU {mru_input} tidak dijumpai.'
+                # Semak jika sudah dihantar oleh rider ini
+                existing = [entry for entry in log if entry['mru'] == mru and entry['rider'] == rider]
+                if existing:
+                    msg = f'MRU {mru} telah dihantar oleh {rider}.'
+                else:
+                    area = df.loc[mru]['Kawasan']
+                    amount = int(df.loc[mru]['Jumlah'])
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Senarai MRU yang telah dihantar oleh rider
-    log = load_log()
-    mru_list = [entry for entry in log if entry['rider'] == session['username']]
+                    log.append({
+                        'rider': rider,
+                        'mru': mru,
+                        'area': area,
+                        'amount': amount,
+                        'timestamp': timestamp
+                    })
+                    save_log(log)
+                    msg = f'MRU {mru} berjaya direkodkan.'
 
-    return render_template('dashboard.html', username=session['username'], message=message, mru_list=mru_list)
+    return render_template('submit.html', rider=session['rider'], message=msg)
 
-# Admin dashboard
 @app.route('/admin')
-def admin_dashboard():
-    if 'username' not in session or session['username'] != 'admin':
-        return redirect(url_for('login'))
-
-    # Load log daripada fail
+def admin():
     log = load_log()
 
-    # Pastikan setiap item dalam log lengkap dengan field untuk paparan
-    for item in log:
-        item['rider'] = item.get('user', '')
-        item['area'] = item.get('kawasan', '')
-        item['amount'] = item.get('nilai', 0)
+    # Summary per rider
+    summary = {}
+    for entry in log:
+        rider = entry['rider']
+        summary.setdefault(rider, {'jumlah_mru': 0, 'jumlah_nilai': 0})
+        summary[rider]['jumlah_mru'] += 1
+        summary[rider]['jumlah_nilai'] += entry['amount']
 
-    # Tukar log kepada DataFrame untuk statistik
-    df = pd.DataFrame(log)
+    summary_list = [{'rider': r, 'jumlah_mru': v['jumlah_mru'], 'jumlah_nilai': v['jumlah_nilai']} for r, v in summary.items()]
 
-    if df.empty:
-        summary = []
-    else:
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df['date'] = df['timestamp'].dt.date
+    return render_template('admin_dashboard.html', log=log, summary=summary_list)
 
-        # Kira jumlah MRU, jumlah nilai, dan bilangan hari bekerja
-        summary = (
-            df.groupby('rider')
-            .agg(
-                jumlah_mru=('mru', 'count'),
-                jumlah_nilai=('amount', 'sum'),
-                hari_bekerja=('date', 'nunique')
-            )
-            .reset_index()
-            .to_dict(orient='records')
-        )
-
-    return render_template('admin_dashboard.html', log=log, summary=summary)
-
-
-# Logout
 @app.route('/logout')
 def logout():
-    session.pop('username', None)
+    session.pop('rider', None)
     return redirect(url_for('login'))
 
-# Run app
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(debug=True, host="0.0.0.0", port=port) # Flask app for MRU Tracker - last updated
+    app.run(debug=True)
