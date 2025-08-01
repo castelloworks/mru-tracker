@@ -1,104 +1,109 @@
-from flask import Flask, request, redirect, url_for, render_template, session
-import pandas as pd
+from flask import Flask, render_template, request, redirect, url_for, session
 import json
 from datetime import datetime
 import os
+import pandas as pd
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
 
-# Fail data
-DATA_FILE = 'data_flat.xlsx'
-LOG_FILE = 'log.json'
+DATA_FILE = 'data/log.json'
+EXCEL_FILE = 'data/data_flat.xlsx'
 
-# Fungsi muat log
-def load_log():
-    if not os.path.exists(LOG_FILE):
-        return []
-    with open(LOG_FILE, 'r') as f:
+# Pastikan data/log.json wujud
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, 'w') as f:
+        json.dump([], f)
+
+# Baca Excel data MRU
+def read_excel_data():
+    df = pd.read_excel(EXCEL_FILE)
+    mru_to_amount = {}
+    for _, row in df.iterrows():
+        mru = str(row['MRU']).strip()
+        amount = int(row['JUMLAH']) if 'JUMLAH' in row and not pd.isna(row['JUMLAH']) else 0
+        mru_to_amount[mru] = amount
+    return mru_to_amount
+
+# Baca log.json
+def read_log():
+    with open(DATA_FILE, 'r') as f:
         return json.load(f)
 
-# Fungsi simpan log
-def save_log(data):
-    with open(LOG_FILE, 'w') as f:
+# Simpan log.json
+def write_log(data):
+    with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=4)
-
-# Fungsi baca data Excel
-def load_excel_data():
-    df = pd.read_excel(DATA_FILE)
-    df['MRU'] = df['MRU'].astype(str)
-    df.set_index('MRU', inplace=True)
-    return df
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        rider = request.form['rider'].strip()
-        if rider:
-            session['rider'] = rider
-            return redirect(url_for('submit'))
+        username = request.form['username']
+        if username:
+            session['username'] = username
+            return redirect(url_for('dashboard'))
     return render_template('login.html')
-
-@app.route('/submit', methods=['GET', 'POST'])
-def submit():
-    if 'rider' not in session:
-        return redirect(url_for('login'))
-
-    msg = ''
-    if request.method == 'POST':
-        mru = request.form['mru'].strip()
-        if not mru:
-            msg = 'Sila masukkan nombor MRU.'
-        else:
-            df = load_excel_data()
-            log = load_log()
-            rider = session['rider']
-
-            # Semak jika MRU wujud
-            if mru not in df.index:
-                msg = f'MRU {mru} tidak wujud dalam data.'
-            else:
-                # Semak jika sudah dihantar oleh rider ini
-                existing = [entry for entry in log if entry['mru'] == mru and entry['rider'] == rider]
-                if existing:
-                    msg = f'MRU {mru} telah dihantar oleh {rider}.'
-                else:
-                    area = df.loc[mru]['Kawasan']
-                    amount = int(df.loc[mru]['Jumlah'])
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-                    log.append({
-                        'rider': rider,
-                        'mru': mru,
-                        'area': area,
-                        'amount': amount,
-                        'timestamp': timestamp
-                    })
-                    save_log(log)
-                    msg = f'MRU {mru} berjaya direkodkan.'
-
-    return render_template('submit.html', rider=session['rider'], message=msg)
-
-@app.route('/admin')
-def admin():
-    log = load_log()
-
-    # Summary per rider
-    summary = {}
-    for entry in log:
-        rider = entry['rider']
-        summary.setdefault(rider, {'jumlah_mru': 0, 'jumlah_nilai': 0})
-        summary[rider]['jumlah_mru'] += 1
-        summary[rider]['jumlah_nilai'] += entry['amount']
-
-    summary_list = [{'rider': r, 'jumlah_mru': v['jumlah_mru'], 'jumlah_nilai': v['jumlah_nilai']} for r, v in summary.items()]
-
-    return render_template('admin_dashboard.html', log=log, summary=summary_list)
 
 @app.route('/logout')
 def logout():
-    session.pop('rider', None)
+    session.pop('username', None)
     return redirect(url_for('login'))
+
+@app.route('/dashboard', methods=['GET', 'POST'])
+def dashboard():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    log = read_log()
+    mru_data = read_excel_data()
+    rider = session.get('username')
+
+    # Filter log ikut rider
+    mru_list = [entry for entry in log if entry.get('rider') == rider]
+
+    return render_template('dashboard.html', username=rider, mru_list=mru_list)
+
+@app.route('/submit_mru', methods=['POST'])
+def submit_mru():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+
+    mru_value = request.form['mru'].strip()
+    log = read_log()
+
+    # Cek sama ada MRU sudah wujud untuk rider ni
+    if any(entry.get('rider') == session['username'] and entry.get('mru') == mru_value for entry in log):
+        return "MRU telah dihantar oleh anda sebelum ini."
+
+    mru_data = read_excel_data()
+    amount_value = mru_data.get(mru_value, 0)
+
+    new_entry = {
+        "rider": session['username'],
+        "mru": mru_value,
+        "amount": amount_value,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+    log.append(new_entry)
+    write_log(log)
+    return redirect(url_for('dashboard'))
+
+@app.route('/admin')
+def admin_dashboard():
+    log = read_log()
+
+    summary = {}
+    for entry in log:
+        rider = entry.get('rider')
+        if not rider:
+            continue
+        if rider not in summary:
+            summary[rider] = {'count': 0, 'total_amount': 0}
+        summary[rider]['count'] += 1
+        summary[rider]['total_amount'] += entry.get('amount', 0)
+
+    return render_template('admin_dashboard.html', summary=summary, log=log)
 
 if __name__ == '__main__':
     app.run(debug=True)
