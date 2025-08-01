@@ -25,10 +25,13 @@ def read_excel_data():
         mru_to_amount[mru] = amount
     return mru_to_amount
 
-# Baca log.json
+# Baca log.json dengan fallback jika kosong/rosak
 def read_log():
-    with open(DATA_FILE, 'r') as f:
-        return json.load(f)
+    try:
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return []
 
 # Simpan log.json
 def write_log(data):
@@ -58,7 +61,7 @@ def dashboard():
     mru_data = read_excel_data()
     rider = session.get('username')
 
-    # Filter log ikut rider
+    # Filter log ikut rider dengan .get untuk elak KeyError
     mru_list = [entry for entry in log if entry.get('rider') == rider]
 
     return render_template('dashboard.html', username=rider, mru_list=mru_list)
@@ -70,16 +73,17 @@ def submit_mru():
 
     mru_value = request.form['mru'].strip()
     log = read_log()
+    rider = session.get('username')
 
-    # Cek sama ada MRU sudah wujud untuk rider ni
-    if any(entry.get('rider') == session['username'] and entry.get('mru') == mru_value for entry in log):
+    # Cek sama ada MRU sudah dihantar oleh rider ini
+    if any(entry.get('rider') == rider and entry.get('mru') == mru_value for entry in log):
         return "MRU telah dihantar oleh anda sebelum ini."
 
     mru_data = read_excel_data()
     amount_value = mru_data.get(mru_value, 0)
 
     new_entry = {
-        "rider": session['username'],
+        "rider": rider,
         "mru": mru_value,
         "amount": amount_value,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -106,4 +110,6 @@ def admin_dashboard():
     return render_template('admin_dashboard.html', summary=summary, log=log)
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    import os
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)
