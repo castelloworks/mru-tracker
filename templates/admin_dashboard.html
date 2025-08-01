@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Dashboard</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin-bottom: 30px;
+        }
+
+        th, td {
+            border: 1px solid #333;
+            padding: 8px 12px;
+            text-align: left;
+            white-space: nowrap;
+        }
+
+        th {
+            background-color: #f2f2f2;
+        }
+
+        h2 {
+            margin-top: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h2>📊 Statistik Mingguan</h2>
+    <table>
+        <tr>
+            <th>Rider</th>
+            <th>Jumlah MRU</th>
+            <th>Jumlah Nilai</th>
+            <th>Hari Bekerja</th>
+        </tr>
+        {% for item in summary %}
+        <tr>
+            <td>{{ item.rider }}</td>
+            <td>{{ item.jumlah_mru }}</td>
+            <td>{{ item.jumlah_nilai }}</td>
+            <td>{{ item.hari_bekerja }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>📜 Log Penuh</h2>
+    <table>
+        <tr>
+            <th>Rider</th>
+            <th>MRU</th>
+            <th>Kawasan</th>
+            <th>Nilai</th>
+            <th>Tarikh</th>
+        </tr>
+        {% for item in log %}
+        <tr>
+            <td>{{ item.rider }}</td>
+            <td>{{ item.mru }}</td>
+            <td style="min-width: 300px;">{{ item.area }}</td>
+            <td>{{ item.amount }}</td>
+            <td>{{ item.timestamp }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <p><a href="{{ url_for('logout') }}">Log Keluar</a></p>
+</body>
+</html>

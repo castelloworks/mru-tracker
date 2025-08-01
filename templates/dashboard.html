@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard Rider</title>
+</head>
+<body>
+    <h2>Selamat datang, {{ user|capitalize }}</h2>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <p style="color: {% if category == 'danger' %}red{% elif category == 'success' %}green{% else %}blue{% endif %};">
+          {{ message }}
+        </p>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="POST">
+        <label>Masukkan nombor MRU:</label><br>
+        <input type="text" name="mru" required><br><br>
+        <button type="submit">Hantar</button>
+    </form>
+
+    <hr>
+    <h4>Senarai MRU yang telah anda hantar:</h4>
+    <ul>
+        {% for entry in user_logs %}
+            <li>{{ entry['mru'] }} - {{ entry['kawasan'] }} ({{ entry['nilai'] }})</li>
+        {% else %}
+            <li>Tiada rekod</li>
+        {% endfor %}
+    </ul>
+
+    <br>
+    <a href="{{ url_for('logout') }}">Log Keluar</a>
+</body>
+</html>
